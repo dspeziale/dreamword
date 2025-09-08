@@ -1,35 +1,53 @@
 # examples/basic_usage.py
 """
-Esempi di utilizzo del framework Python
+Esempi di utilizzo del framework Python con gestione automatica directory instance
 """
 
 import sys
 import os
 import time
-4
+from pathlib import Path
+
 # Aggiunge il framework al path
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+current_dir = Path(__file__).parent
+framework_dir = current_dir.parent
+sys.path.insert(0, str(framework_dir))
 
-from database import (
-    SQLiteManager, MSSQLManager
-)
-from networking import (
-    HeartBeat, SimpleServer, NetworkInfo
-)
+# Import del framework
+from database import SQLiteManager, MSSQLManager
+from networking import HeartBeat, SimpleServer, NetworkInfo
+from scanner import NmapScanner
+from utils import setup_logger, get_default_logger
+from config import get_config, set_base_directory
 
-from scanner import ( NmapScanner)
-from utils import (setup_logger)
+
+def show_configuration():
+    """Mostra la configurazione attuale delle directory"""
+    print("\n=== CONFIGURAZIONE FRAMEWORK ===")
+    config = get_config()
+    paths = config.get_full_paths()
+
+    for name, path in paths.items():
+        exists = "✓" if Path(path).exists() else "✗"
+        print(f"{exists} {name}: {path}")
+
+    print("\nDirectory instance creata automaticamente!")
 
 
 def example_database():
-    """Esempio uso database SQLite"""
+    """Esempio uso database SQLite con directory instance"""
     print("\n=== ESEMPIO DATABASE SQLITE ===")
 
-    # Setup logger
-    logger = setup_logger("database_example", "INFO", "logs/database.log")
+    # Logger automatico che usa instance/logs
+    logger = get_default_logger("database_example", "INFO")
 
-    # Inizializza database
-    db = SQLiteManager("test.db")
+    # Database automaticamente in instance/database
+    db = SQLiteManager("example.db")
+
+    # Mostra info database
+    db_info = db.get_database_info()
+    print(f"Database path: {db_info['database_path']}")
+    print(f"Dimensione: {db_info['file_size_mb']} MB")
 
     # Crea tabella
     columns = {
@@ -39,217 +57,256 @@ def example_database():
         "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
     }
 
-    db.create_table("utenti", columns)
+    if db.create_table("utenti", columns):
+        print("Tabella 'utenti' creata con successo")
 
-    # Inserisce dati
-    user_data = {
-        "nome": "Mario Rossi",
-        "email": "mario@test.com"
-    }
+    # Inserisce dati di esempio
+    test_users = [
+        {"nome": "Mario Rossi", "email": "mario@test.com"},
+        {"nome": "Luigi Verdi", "email": "luigi@test.com"},
+        {"nome": "Anna Bianchi", "email": "anna@test.com"}
+    ]
 
-    user_id = db.insert_data("utenti", user_data)
-    print(f"Utente inserito con ID: {user_id}")
+    for user in test_users:
+        user_id = db.insert_data("utenti", user)
+        if user_id:
+            print(f"Utente '{user['nome']}' inserito con ID: {user_id}")
 
     # Query dati
-    users = db.execute_query("SELECT * FROM utenti WHERE nome LIKE ?", ("%Mario%",))
-    print(f"Utenti trovati: {users}")
+    users = db.execute_query("SELECT * FROM utenti ORDER BY id")
+    print(f"\nUtenti nel database ({len(users)}):")
+    for user in users:
+        print(f"  ID: {user['id']} - {user['nome']} ({user['email']})")
+
+    # Test backup
+    backup_path = db.backup_database()
+    if backup_path:
+        print(f"Backup creato: {backup_path}")
+
+
+def example_logging():
+    """Esempio sistema di logging con instance"""
+    print("\n=== ESEMPIO LOGGING ===")
+
+    # Logger con configurazione automatica
+    app_logger = get_default_logger("app_test", "DEBUG")
+    network_logger = get_default_logger("network_test", "INFO")
+
+    # Test logging
+    app_logger.debug("Messaggio di debug")
+    app_logger.info("Applicazione avviata")
+    app_logger.warning("Questo è un warning")
+
+    network_logger.info("Connessione di rete stabilita")
+    network_logger.error("Errore di connessione simulato")
+
+    # Mostra informazioni sui logger
+    from utils.logger import get_logger_info
+    logger_info = get_logger_info()
+
+    print("\nLogger attivi:")
+    for name, info in logger_info.items():
+        if name.endswith("_test"):
+            print(f"  {name}: livello {info['level']}")
+            for handler in info['handlers']:
+                if 'file' in handler:
+                    print(f"    → Log file: {handler['file']}")
 
 
 def example_networking():
-    """Esempio networking e heartbeat"""
+    """Esempio networking con logging in instance"""
     print("\n=== ESEMPIO NETWORKING ===")
 
-    # Setup logger
-    logger = setup_logger("network_example", "INFO")
+    # Logger automatico
+    logger = get_default_logger("network_example", "INFO")
 
     # Informazioni di rete
     net_info = NetworkInfo()
 
     print(f"IP locale: {net_info.get_local_ip()}")
-    print(f"Interfacce: {net_info.get_all_interfaces()}")
+    print(f"Hostname: {net_info.get_system_info()['hostname']}")
 
-    # Test ping
-    ping_result = net_info.ping_host("8.8.8.8", 2)
-    print(f"Ping Google DNS: {'Successo' if ping_result['success'] else 'Fallito'}")
+    # Test ping con logging automatico
+    targets = ["8.8.8.8", "1.1.1.1", "google.com"]
 
-    # Heartbeat example
-    def on_failure():
+    print("\nTest connettività:")
+    for target in targets:
+        result = net_info.ping_host(target, 1)
+        status = "OK" if result['success'] else "FAIL"
+        print(f"  {target}: {status}")
+        logger.info(f"Ping {target}: {status}")
+
+    # Heartbeat con callback che usa logger
+    def on_connection_failure():
+        logger.error("HEARTBEAT: Connessione persa!")
         print("HEARTBEAT: Connessione persa!")
 
-    def on_success():
-        print("HEARTBEAT: Connessione OK")
+    def on_connection_success():
+        logger.debug("HEARTBEAT: Connessione OK")
 
     # Heartbeat verso Google DNS
-    hb = HeartBeat("8.8.8.8", 53, interval=10)
-    hb.set_failure_callback(on_failure)
-    hb.set_success_callback(on_success)
+    hb = HeartBeat("8.8.8.8", 53, interval=5)
+    hb.set_failure_callback(on_connection_failure)
+    hb.set_success_callback(on_connection_success)
 
-    print("Avvio heartbeat (premi Ctrl+C per fermare)...")
+    print("\nAvvio heartbeat per 15 secondi...")
     hb.start()
 
     try:
-        time.sleep(30)  # Monitora per 30 secondi
+        time.sleep(15)
     except KeyboardInterrupt:
         pass
     finally:
         hb.stop()
+        logger.info("Heartbeat fermato")
 
 
-def example_server():
-    """Esempio server TCP"""
-    print("\n=== ESEMPIO SERVER ===")
+def example_file_management():
+    """Esempio gestione file con directory instance"""
+    print("\n=== ESEMPIO GESTIONE FILE ===")
 
-    def custom_handler(client_socket, address):
-        """Gestore personalizzato per client"""
-        print(f"Nuovo client: {address}")
+    config = get_config()
 
-        try:
-            # Invia messaggio di benvenuto
-            welcome = f"Benvenuto {address}! Scrivi 'quit' per uscire.\n"
-            client_socket.send(welcome.encode('utf-8'))
+    # Test file temporaneo
+    temp_file = config.get_temp_path("test_file.txt")
 
-            while True:
-                data = client_socket.recv(1024)
-                if not data:
-                    break
+    # Scrive file temporaneo
+    with open(temp_file, 'w') as f:
+        f.write("Questo è un file di test temporaneo\n")
+        f.write(f"Creato il: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
 
-                message = data.decode('utf-8').strip()
-                print(f"Ricevuto da {address}: {message}")
+    print(f"File temporaneo creato: {temp_file}")
 
-                if message.lower() == 'quit':
-                    client_socket.send("Arrivederci!\n".encode('utf-8'))
-                    break
+    # Legge file
+    with open(temp_file, 'r') as f:
+        content = f.read()
+        print(f"Contenuto:\n{content}")
 
-                # Echo del messaggio
-                response = f"Echo: {message}\n"
-                client_socket.send(response.encode('utf-8'))
+    # Cleanup
+    print("\nPulizia file temporanei...")
+    config.cleanup_temp()
 
-        except Exception as e:
-            print(f"Errore con client {address}: {e}")
-        finally:
-            client_socket.close()
-            print(f"Client {address} disconnesso")
-
-    # Crea e configura server
-    server = SimpleServer("127.0.0.1", 8080)
-    server.set_client_handler(custom_handler)
-
-    print("Server in ascolto su 127.0.0.1:8080")
-    print("Connettiti con: telnet 127.0.0.1 8080")
-    print("Premi Ctrl+C per fermare...")
-
-    try:
-        server.start()
-    except KeyboardInterrupt:
-        print("\nChiusura server...")
-        server.stop()
+    # Verifica pulizia
+    if not Path(temp_file).exists():
+        print("File temporaneo rimosso con successo")
 
 
-def example_nmap():
-    """Esempio scansioni Nmap"""
-    print("\n=== ESEMPIO NMAP SCANNER ===")
+def example_advanced_database():
+    """Esempio avanzato database con operazioni CRUD"""
+    print("\n=== ESEMPIO DATABASE AVANZATO ===")
 
-    try:
-        scanner = NmapScanner()
+    db = SQLiteManager("advanced_example.db")
+    logger = get_default_logger("db_advanced", "INFO")
 
-        # Mostra tecniche disponibili
-        print("Tecniche di scansione disponibili:")
-        for name, desc in scanner.get_scan_techniques().items():
-            print(f"  {name}: {desc}")
+    # Crea tabella progetti
+    projects_table = {
+        "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+        "nome": "TEXT NOT NULL",
+        "descrizione": "TEXT",
+        "stato": "TEXT DEFAULT 'nuovo'",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+    }
 
-        # Ping sweep della rete locale
-        print("\n--- Ping Sweep ---")
-        local_network = "192.168.1.0/24"  # Modifica secondo la tua rete
-        ping_results = scanner.ping_sweep(local_network)
+    db.create_table("progetti", projects_table)
 
-        if "active_hosts" in ping_results:
-            print(f"Host attivi trovati: {ping_results['total_found']}")
-            for host in ping_results["active_hosts"][:5]:  # Mostra primi 5
-                print(f"  {host['ip']} - {host['hostname']}")
+    # Inserisce progetti di esempio
+    progetti = [
+        {"nome": "Framework Python", "descrizione": "Sviluppo framework per networking", "stato": "in_corso"},
+        {"nome": "Scanner di Rete", "descrizione": "Tool per scansioni Nmap", "stato": "completato"},
+        {"nome": "Database Manager", "descrizione": "Gestione database SQLite e MSSQL", "stato": "in_corso"}
+    ]
 
-        # Scansione porte comuni su localhost
-        print("\n--- Scansione Porte Localhost ---")
-        port_scan = scanner.scan_host("127.0.0.1", "22,80,135,443,445,3389")
+    for progetto in progetti:
+        project_id = db.insert_data("progetti", progetto)
+        logger.info(f"Progetto '{progetto['nome']}' creato con ID {project_id}")
 
-        if "hosts" in port_scan:
-            for host in port_scan["hosts"]:
-                print(f"Host: {host['ip']} - Status: {host['status']}")
-                if host["open_ports"]:
-                    print("  Porte aperte:")
-                    for port in host["open_ports"]:
-                        print(f"    {port['port']}/{port['protocol']}")
+    # Update di un progetto
+    updated_rows = db.update_data(
+        "progetti",
+        {"stato": "completato", "updated_at": "CURRENT_TIMESTAMP"},
+        "nome = ?",
+        ("Framework Python",)
+    )
+    print(f"Aggiornati {updated_rows} progetti")
 
-        # Scansione dettagliata (commentata per sicurezza)
-        # print("\n--- Scansione Dettagliata ---")
-        # detailed = scanner.port_scan_detailed("scanme.nmap.org", "22,80,443")
-        # print(f"Risultati dettagliati: {detailed}")
+    # Query con filtri
+    progetti_attivi = db.execute_query(
+        "SELECT * FROM progetti WHERE stato IN (?, ?) ORDER BY created_at DESC",
+        ("in_corso", "completato")
+    )
 
-    except Exception as e:
-        print(f"Errore scanner: {e}")
-        print("Assicurati che Nmap sia installato e accessibile")
+    print(f"\nProgetti trovati: {len(progetti_attivi)}")
+    for prog in progetti_attivi:
+        print(f"  [{prog['stato']}] {prog['nome']}: {prog['descrizione']}")
 
-
-def example_mssql():
-    """Esempio database MSSQL (richiede configurazione)"""
-    print("\n=== ESEMPIO MSSQL (DEMO) ===")
-
-    # Questo è solo un esempio di configurazione
-    # Modifica i parametri secondo il tuo ambiente
-
-    try:
-        # Connessione con autenticazione Windows
-        db = MSSQLManager(
-            server="localhost\\SQLEXPRESS",
-            database="TestDB",
-            trusted_connection=True
-        )
-
-        # Test connessione
-        result = db.execute_query("SELECT @@VERSION as version")
-        print(f"Connesso a SQL Server: {result}")
-
-    except Exception as e:
-        print(f"Errore MSSQL (normale se non configurato): {e}")
+    # Informazioni tabella
+    table_info = db.get_table_info("progetti")
+    print(f"\nStruttura tabella 'progetti':")
+    for col in table_info:
+        print(f"  {col['name']}: {col['type']}")
 
 
 def main():
     """Funzione principale con menu esempi"""
 
+    # Imposta directory base se necessario
+    # set_base_directory("/path/to/your/project")  # Opzionale
+
     while True:
-        print("\n" + "=" * 50)
-        print("FRAMEWORK PYTHON - ESEMPI")
-        print("=" * 50)
-        print("1. Database SQLite")
-        print("2. Networking e HeartBeat")
-        print("3. Server TCP")
-        print("4. Scanner Nmap")
-        print("5. Database MSSQL (demo)")
-        print("0. Esci")
+        print("\n" + "=" * 60)
+        print("FRAMEWORK PYTHON - ESEMPI CON DIRECTORY INSTANCE")
+        print("=" * 60)
+        print("0. Mostra configurazione directory")
+        print("1. Database SQLite base")
+        print("2. Sistema di logging")
+        print("3. Networking e HeartBeat")
+        print("4. Gestione file temporanei")
+        print("5. Database avanzato (CRUD)")
+        print("6. Scanner Nmap")
+        print("9. Esci")
 
         try:
-            choice = input("\nScegli esempio (0-5): ").strip()
+            choice = input("\nScegli esempio (0-9): ").strip()
 
-            if choice == "0":
+            if choice == "9":
                 print("Arrivederci!")
                 break
+            elif choice == "0":
+                show_configuration()
             elif choice == "1":
                 example_database()
             elif choice == "2":
-                example_networking()
+                example_logging()
             elif choice == "3":
-                example_server()
+                example_networking()
             elif choice == "4":
-                example_nmap()
+                example_file_management()
             elif choice == "5":
-                example_mssql()
+                example_advanced_database()
+            elif choice == "6":
+                try:
+                    scanner = NmapScanner()
+                    print("Scanner Nmap disponibile")
+
+                    # Ping sweep veloce
+                    print("Ping sweep rete locale...")
+                    results = scanner.ping_sweep("127.0.0.1/32")
+                    print(f"Host trovati: {results.get('total_found', 0)}")
+
+                except Exception as e:
+                    print(f"Scanner Nmap non disponibile: {e}")
             else:
                 print("Scelta non valida!")
+
+            input("\nPremi Enter per continuare...")
 
         except KeyboardInterrupt:
             print("\n\nInterrotto dall'utente. Arrivederci!")
             break
         except Exception as e:
             print(f"Errore: {e}")
+            input("Premi Enter per continuare...")
 
 
 if __name__ == "__main__":

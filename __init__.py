@@ -1,17 +1,18 @@
-# framework/__init__.py
+# __init__.py (root del progetto dreamword)
 """
 Framework Python per applicazioni di rete e database
 Utilizza la directory 'instance' per log e database
 """
 
 __version__ = "1.0.0"
-__author__ = "Il tuo nome"
+__author__ = "Daniele Speziale"
 
-from .config import get_config, set_base_directory
-from .database import SQLiteManager, MSSQLManager
-from .networking import HeartBeat, SimpleServer, NetworkInfo
-from .scanner import NmapScanner
-from .utils import setup_logger, get_default_logger
+# Import diretti (senza punti)
+from config import get_config, set_base_directory
+from database import SQLiteManager, MSSQLManager
+from networking import HeartBeat, SimpleServer, NetworkInfo
+from scanner import NmapScanner
+from utils import setup_logger, get_default_logger
 
 __all__ = [
     'get_config',

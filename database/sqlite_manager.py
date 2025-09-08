@@ -1,4 +1,4 @@
-# database/sqlite_manager.py (versione senza import relativi)
+# framework/database/sqlite_manager.py
 import sqlite3
 import logging
 import os
@@ -6,34 +6,6 @@ import sys
 from typing import List, Dict, Any, Optional
 from contextlib import contextmanager
 from pathlib import Path
-
-# Aggiunge il parent directory al path per importare config
-current_dir = Path(__file__).parent
-parent_dir = current_dir.parent
-sys.path.insert(0, str(parent_dir))
-
-try:
-    from config import get_config
-except ImportError:
-    # Fallback se config non è disponibile
-    class DummyConfig:
-        def __init__(self):
-            self.base_dir = Path.cwd()
-            self.instance_dir = self.base_dir / "instance"
-            self.database_dir = self.instance_dir / "database"
-            self._create_directories()
-
-        def _create_directories(self):
-            self.database_dir.mkdir(parents=True, exist_ok=True)
-
-        def get_database_path(self, db_name: str) -> str:
-            if not db_name.endswith('.db'):
-                db_name += '.db'
-            return str(self.database_dir / db_name)
-
-
-    def get_config():
-        return DummyConfig()
 
 
 class SQLiteManager:
@@ -46,10 +18,35 @@ class SQLiteManager:
         Args:
             db_name: Nome del database (sarà salvato in instance/database/)
         """
-        config = get_config()
-        self.db_path = config.get_database_path(db_name)
+        # Importazione sicura del config
+        try:
+            from ..config import get_config
+            config = get_config()
+            self.db_path = config.get_database_path(db_name)
+        except (ImportError, ValueError):
+            # Fallback: crea instance directory manualmente
+            self._setup_fallback_path(db_name)
+
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"Database SQLite: {self.db_path}")
+
+    def _setup_fallback_path(self, db_name: str):
+        """Setup path fallback se config non disponibile"""
+        # Trova la directory del progetto
+        current_file = Path(__file__).resolve()
+
+        # Cerca la directory che contiene 'framework'
+        project_root = current_file.parent.parent.parent
+        if not (project_root / "framework").exists():
+            project_root = Path.cwd()
+
+        # Crea structure instance
+        instance_dir = project_root / "instance" / "database"
+        instance_dir.mkdir(parents=True, exist_ok=True)
+
+        if not db_name.endswith('.db'):
+            db_name += '.db'
+        self.db_path = str(instance_dir / db_name)
 
     @contextmanager
     def get_connection(self):
@@ -111,6 +108,34 @@ class SQLiteManager:
             self.logger.error(f"Errore inserimento in {table_name}: {e}")
             return None
 
+    def update_data(self, table_name: str, data: Dict[str, Any], where_clause: str, where_params: tuple = ()) -> int:
+        """Aggiorna dati in una tabella"""
+        try:
+            set_clause = ", ".join([f"{key} = ?" for key in data.keys()])
+            query = f"UPDATE {table_name} SET {set_clause} WHERE {where_clause}"
+            params = tuple(data.values()) + where_params
+            return self.execute_non_query(query, params)
+        except Exception as e:
+            self.logger.error(f"Errore aggiornamento {table_name}: {e}")
+            return 0
+
+    def delete_data(self, table_name: str, where_clause: str, where_params: tuple = ()) -> int:
+        """Elimina dati da una tabella"""
+        try:
+            query = f"DELETE FROM {table_name} WHERE {where_clause}"
+            return self.execute_non_query(query, where_params)
+        except Exception as e:
+            self.logger.error(f"Errore eliminazione da {table_name}: {e}")
+            return 0
+
+    def get_table_info(self, table_name: str) -> List[Dict[str, Any]]:
+        """Ottiene informazioni sulla struttura di una tabella"""
+        try:
+            return self.execute_query(f"PRAGMA table_info({table_name})")
+        except Exception as e:
+            self.logger.error(f"Errore informazioni tabella {table_name}: {e}")
+            return []
+
     def get_database_info(self) -> Dict[str, Any]:
         """Ottiene informazioni sul database"""
         try:
@@ -120,7 +145,6 @@ class SQLiteManager:
             )
 
             # Dimensione file
-            import os
             file_size = os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0
 
             return {
@@ -133,3 +157,31 @@ class SQLiteManager:
         except Exception as e:
             self.logger.error(f"Errore informazioni database: {e}")
             return {"error": str(e)}
+
+    def backup_database(self, backup_name: str = None) -> str:
+        """Crea un backup del database"""
+        try:
+            if backup_name is None:
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                backup_name = f"backup_{timestamp}.db"
+
+            # Usa temp directory se disponibile
+            try:
+                from ..config import get_temp_path
+                backup_path = get_temp_path(backup_name)
+            except ImportError:
+                backup_path = str(Path(self.db_path).parent / backup_name)
+
+            # Esegue backup
+            with self.get_connection() as conn:
+                backup_conn = sqlite3.connect(backup_path)
+                conn.backup(backup_conn)
+                backup_conn.close()
+
+            self.logger.info(f"Backup creato: {backup_path}")
+            return backup_path
+
+        except Exception as e:
+            self.logger.error(f"Errore backup database: {e}")
+            return ""

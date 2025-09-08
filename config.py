@@ -1,4 +1,4 @@
-# config.py (file standalone nella root del progetto)
+# framework/config.py
 """
 Configurazione del framework per gestire directory instance
 """
@@ -13,7 +13,9 @@ class FrameworkConfig:
     def __init__(self, base_dir: str = None):
         # Directory base del progetto
         if base_dir is None:
-            base_dir = os.getcwd()
+            # Trova la directory del progetto (dove si trova config.py)
+            current_file = Path(__file__).resolve()
+            base_dir = current_file.parent
 
         self.base_dir = Path(base_dir)
         self.instance_dir = self.base_dir / "instance"
@@ -60,8 +62,19 @@ class FrameworkConfig:
             for file_path in self.temp_dir.glob("*"):
                 if file_path.is_file():
                     file_path.unlink()
+                    print(f"Rimosso file temporaneo: {file_path.name}")
         except Exception as e:
             print(f"Errore pulizia temp: {e}")
+
+    def get_full_paths(self) -> dict:
+        """Ritorna tutti i path importanti"""
+        return {
+            "base_dir": str(self.base_dir),
+            "instance_dir": str(self.instance_dir),
+            "logs_dir": str(self.logs_dir),
+            "database_dir": str(self.database_dir),
+            "temp_dir": str(self.temp_dir)
+        }
 
 
 # Istanza globale della configurazione
@@ -80,3 +93,19 @@ def set_base_directory(base_dir: str):
     """Imposta una directory base personalizzata"""
     global _config
     _config = FrameworkConfig(base_dir)
+
+
+# Funzioni di utilità per accesso rapido
+def get_database_path(db_name: str) -> str:
+    """Accesso rapido al path database"""
+    return get_config().get_database_path(db_name)
+
+
+def get_log_path(log_name: str) -> str:
+    """Accesso rapido al path log"""
+    return get_config().get_log_path(log_name)
+
+
+def get_temp_path(file_name: str) -> str:
+    """Accesso rapido al path temporaneo"""
+    return get_config().get_temp_path(file_name)
