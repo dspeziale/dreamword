@@ -1,0 +1,26 @@
+# Database
+pyodbc>=4.0.0
+sqlite3-utils>=3.34.0
+sqlalchemy>=2.0.0
+alembic>=1.13.0
+
+# Networking
+requests>=2.31.0
+aiohttp>=3.9.0
+websockets>=12.0
+httpx>=0.25.0
+
+# Utilities
+pydantic>=2.5.0
+python-dotenv>=1.0.0
+loguru>=0.7.0
+click>=8.1.0
+rich>=13.7.0
+toml>=0.10.2
+jinja2>=3.1.0
+
+# Development
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+black>=23.0.0
+mypy>=1.7.0
