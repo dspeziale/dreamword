@@ -11,7 +11,7 @@ from .config import get_config, set_base_directory
 from .database import SQLiteManager, MSSQLManager
 from .networking import HeartBeat, SimpleServer, NetworkInfo
 from .scanner import NmapScanner
-from .utils import setup_logger
+from .utils import setup_logger, get_default_logger
 
 __all__ = [
     'get_config',
@@ -22,5 +22,6 @@ __all__ = [
     'SimpleServer',
     'NetworkInfo',
     'NmapScanner',
-    'setup_logger'
+    'setup_logger',
+    'get_default_logger'
 ]

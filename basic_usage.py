@@ -26,7 +26,7 @@ def example_database():
     print("\n=== ESEMPIO DATABASE SQLITE ===")
 
     # Setup logger
-    logger = setup_logger("database_example", "INFO", "../logs/database.log")
+    logger = setup_logger("database_example", "INFO", "logs/database.log")
 
     # Inizializza database
     db = SQLiteManager("test.db")

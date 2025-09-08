@@ -1,4 +1,4 @@
-# framework/config.py
+# config.py (file standalone nella root del progetto)
 """
 Configurazione del framework per gestire directory instance
 """

@@ -1,9 +1,39 @@
-# framework/database/sqlite_manager.py
+# database/sqlite_manager.py (versione senza import relativi)
 import sqlite3
 import logging
+import os
+import sys
 from typing import List, Dict, Any, Optional
 from contextlib import contextmanager
-from ..config import get_config
+from pathlib import Path
+
+# Aggiunge il parent directory al path per importare config
+current_dir = Path(__file__).parent
+parent_dir = current_dir.parent
+sys.path.insert(0, str(parent_dir))
+
+try:
+    from config import get_config
+except ImportError:
+    # Fallback se config non è disponibile
+    class DummyConfig:
+        def __init__(self):
+            self.base_dir = Path.cwd()
+            self.instance_dir = self.base_dir / "instance"
+            self.database_dir = self.instance_dir / "database"
+            self._create_directories()
+
+        def _create_directories(self):
+            self.database_dir.mkdir(parents=True, exist_ok=True)
+
+        def get_database_path(self, db_name: str) -> str:
+            if not db_name.endswith('.db'):
+                db_name += '.db'
+            return str(self.database_dir / db_name)
+
+
+    def get_config():
+        return DummyConfig()
 
 
 class SQLiteManager:
