@@ -1,0 +1,14 @@
+# requirements.txt
+# Database
+pyodbc>=4.0.35          # Per MSSQL Server
+
+# Networking e sistema
+psutil>=5.9.0           # Informazioni sistema e rete
+python-nmap>=0.7.1      # Wrapper Python per Nmap
+
+# Utilities
+requests>=2.28.0        # HTTP requests
+
+# Development e testing (opzionali)
+pytest>=7.0.0
+pytest-cov>=4.0.0
