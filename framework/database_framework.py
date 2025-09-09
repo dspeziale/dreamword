@@ -1,4 +1,4 @@
-# database_framework.py
+# framework/database_framework.py
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Union
@@ -7,6 +7,14 @@ import logging
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
+
+from .exceptions import (
+    DatabaseError,
+    ConnectionError,
+    DuplicateKeyError,
+    ConstraintViolationError,
+    ConfigurationError
+)
 
 # Configurazione logging
 logging.basicConfig(level=logging.INFO)
@@ -30,6 +38,17 @@ class DatabaseConfig:
     password: Optional[str] = None
     file_path: Optional[str] = None  # Per SQLite
     additional_params: Optional[Dict[str, Any]] = None
+
+    def __post_init__(self):
+        """Validazione della configurazione"""
+        if self.db_type == DatabaseType.SQLITE:
+            if not self.file_path:
+                self.file_path = ":memory:"
+        elif self.db_type in [DatabaseType.MYSQL, DatabaseType.MSSQL]:
+            if not all([self.host, self.database, self.username]):
+                raise ConfigurationError(
+                    f"Per {self.db_type.value} servono: host, database, username"
+                )
 
 
 class DatabaseConnection(ABC):
@@ -87,6 +106,11 @@ class DatabaseConnection(ABC):
     def rollback(self):
         pass
 
+    @property
+    def is_connected(self) -> bool:
+        """Verifica se la connessione è attiva"""
+        return self._connection is not None
+
 
 class SQLiteConnection(DatabaseConnection):
     """Implementazione per SQLite"""
@@ -101,7 +125,7 @@ class SQLiteConnection(DatabaseConnection):
             logger.info(f"Connesso a SQLite: {self.config.file_path}")
         except Exception as e:
             logger.error(f"Errore connessione SQLite: {e}")
-            raise
+            raise ConnectionError(f"Impossibile connettersi a SQLite: {e}")
 
     def disconnect(self):
         if self._connection:
@@ -110,6 +134,9 @@ class SQLiteConnection(DatabaseConnection):
             logger.info("Disconnesso da SQLite")
 
     def execute_query(self, query: str, params: Optional[tuple] = None) -> List[Dict]:
+        if not self._connection:
+            raise ConnectionError("Nessuna connessione attiva")
+
         cursor = self._connection.cursor()
         try:
             cursor.execute(query, params or ())
@@ -117,11 +144,14 @@ class SQLiteConnection(DatabaseConnection):
             return [dict(row) for row in rows]
         except Exception as e:
             logger.error(f"Errore query SQLite: {e}")
-            raise
+            raise DatabaseError(f"Errore esecuzione query: {e}")
         finally:
             cursor.close()
 
     def execute_command(self, command: str, params: Optional[tuple] = None) -> int:
+        if not self._connection:
+            raise ConnectionError("Nessuna connessione attiva")
+
         cursor = self._connection.cursor()
         try:
             cursor.execute(command, params or ())
@@ -141,26 +171,38 @@ class SQLiteConnection(DatabaseConnection):
             cursor.close()
 
     def execute_many(self, command: str, params_list: List[tuple]) -> int:
+        if not self._connection:
+            raise ConnectionError("Nessuna connessione attiva")
+
         cursor = self._connection.cursor()
         try:
             cursor.executemany(command, params_list)
             self._connection.commit()
             return cursor.rowcount
+        except sqlite3.IntegrityError as e:
+            self._connection.rollback()
+            if "UNIQUE constraint failed" in str(e):
+                raise DuplicateKeyError(f"Chiave duplicata: {e}")
+            else:
+                raise ConstraintViolationError(f"Violazione constraint: {e}")
         except Exception as e:
             logger.error(f"Errore executemany SQLite: {e}")
             self._connection.rollback()
-            raise
+            raise DatabaseError(f"Errore SQLite: {e}")
         finally:
             cursor.close()
 
     def begin_transaction(self):
-        self._connection.execute("BEGIN")
+        if self._connection:
+            self._connection.execute("BEGIN")
 
     def commit(self):
-        self._connection.commit()
+        if self._connection:
+            self._connection.commit()
 
     def rollback(self):
-        self._connection.rollback()
+        if self._connection:
+            self._connection.rollback()
 
 
 class MySQLConnection(DatabaseConnection):
@@ -187,7 +229,7 @@ class MySQLConnection(DatabaseConnection):
             logger.info(f"Connesso a MySQL: {self.config.host}:{self.config.port}")
         except Exception as e:
             logger.error(f"Errore connessione MySQL: {e}")
-            raise
+            raise ConnectionError(f"Impossibile connettersi a MySQL: {e}")
 
     def disconnect(self):
         if self._connection:
@@ -196,30 +238,45 @@ class MySQLConnection(DatabaseConnection):
             logger.info("Disconnesso da MySQL")
 
     def execute_query(self, query: str, params: Optional[tuple] = None) -> List[Dict]:
+        if not self._connection:
+            raise ConnectionError("Nessuna connessione attiva")
+
         cursor = self._connection.cursor(dictionary=True)
         try:
             cursor.execute(query, params or ())
             return cursor.fetchall()
         except Exception as e:
             logger.error(f"Errore query MySQL: {e}")
-            raise
+            raise DatabaseError(f"Errore esecuzione query: {e}")
         finally:
             cursor.close()
 
     def execute_command(self, command: str, params: Optional[tuple] = None) -> int:
+        if not self._connection:
+            raise ConnectionError("Nessuna connessione attiva")
+
         cursor = self._connection.cursor()
         try:
             cursor.execute(command, params or ())
             self._connection.commit()
             return cursor.rowcount
+        except self.mysql.IntegrityError as e:
+            self._connection.rollback()
+            if "Duplicate entry" in str(e):
+                raise DuplicateKeyError(f"Chiave duplicata MySQL: {e}")
+            else:
+                raise ConstraintViolationError(f"Violazione constraint MySQL: {e}")
         except Exception as e:
             logger.error(f"Errore comando MySQL: {e}")
             self._connection.rollback()
-            raise
+            raise DatabaseError(f"Errore MySQL: {e}")
         finally:
             cursor.close()
 
     def execute_many(self, command: str, params_list: List[tuple]) -> int:
+        if not self._connection:
+            raise ConnectionError("Nessuna connessione attiva")
+
         cursor = self._connection.cursor()
         try:
             cursor.executemany(command, params_list)
@@ -228,18 +285,21 @@ class MySQLConnection(DatabaseConnection):
         except Exception as e:
             logger.error(f"Errore executemany MySQL: {e}")
             self._connection.rollback()
-            raise
+            raise DatabaseError(f"Errore MySQL: {e}")
         finally:
             cursor.close()
 
     def begin_transaction(self):
-        self._connection.start_transaction()
+        if self._connection:
+            self._connection.start_transaction()
 
     def commit(self):
-        self._connection.commit()
+        if self._connection:
+            self._connection.commit()
 
     def rollback(self):
-        self._connection.rollback()
+        if self._connection:
+            self._connection.rollback()
 
 
 class MSSQLConnection(DatabaseConnection):
@@ -266,7 +326,7 @@ class MSSQLConnection(DatabaseConnection):
             logger.info(f"Connesso a SQL Server: {self.config.host}:{self.config.port}")
         except Exception as e:
             logger.error(f"Errore connessione SQL Server: {e}")
-            raise
+            raise ConnectionError(f"Impossibile connettersi a SQL Server: {e}")
 
     def disconnect(self):
         if self._connection:
@@ -275,6 +335,9 @@ class MSSQLConnection(DatabaseConnection):
             logger.info("Disconnesso da SQL Server")
 
     def execute_query(self, query: str, params: Optional[tuple] = None) -> List[Dict]:
+        if not self._connection:
+            raise ConnectionError("Nessuna connessione attiva")
+
         cursor = self._connection.cursor()
         try:
             cursor.execute(query, params or ())
@@ -283,11 +346,14 @@ class MSSQLConnection(DatabaseConnection):
             return [dict(zip(columns, row)) for row in rows]
         except Exception as e:
             logger.error(f"Errore query SQL Server: {e}")
-            raise
+            raise DatabaseError(f"Errore esecuzione query: {e}")
         finally:
             cursor.close()
 
     def execute_command(self, command: str, params: Optional[tuple] = None) -> int:
+        if not self._connection:
+            raise ConnectionError("Nessuna connessione attiva")
+
         cursor = self._connection.cursor()
         try:
             cursor.execute(command, params or ())
@@ -307,6 +373,9 @@ class MSSQLConnection(DatabaseConnection):
             cursor.close()
 
     def execute_many(self, command: str, params_list: List[tuple]) -> int:
+        if not self._connection:
+            raise ConnectionError("Nessuna connessione attiva")
+
         cursor = self._connection.cursor()
         try:
             cursor.executemany(command, params_list)
@@ -326,13 +395,16 @@ class MSSQLConnection(DatabaseConnection):
             cursor.close()
 
     def begin_transaction(self):
-        self._connection.autocommit = False
+        if self._connection:
+            self._connection.autocommit = False
 
     def commit(self):
-        self._connection.commit()
+        if self._connection:
+            self._connection.commit()
 
     def rollback(self):
-        self._connection.rollback()
+        if self._connection:
+            self._connection.rollback()
 
 
 class DatabaseFactory:
@@ -366,9 +438,19 @@ class DatabaseManager:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.connection.disconnect()
 
+    @property
+    def is_connected(self) -> bool:
+        """Verifica se il manager è connesso"""
+        return self.connection.is_connected
+
     def select(self, query: str, params: Optional[tuple] = None) -> List[Dict]:
         """Esegue una query SELECT"""
         return self.connection.execute_query(query, params)
+
+    def select_one(self, query: str, params: Optional[tuple] = None) -> Optional[Dict]:
+        """Esegue una query SELECT e ritorna un solo risultato"""
+        results = self.select(query, params)
+        return results[0] if results else None
 
     def insert(self, table: str, data: Dict[str, Any]) -> int:
         """Inserisce un record"""
@@ -413,98 +495,15 @@ class DatabaseManager:
         """Ritorna context manager per transazioni"""
         return self.connection.transaction()
 
+    def count(self, table: str, where_clause: str = None, where_params: Optional[tuple] = None) -> int:
+        """Conta i record in una tabella"""
+        query = f"SELECT COUNT(*) as count FROM {table}"
+        if where_clause:
+            query += f" WHERE {where_clause}"
 
-# Esporta tutte le classi e funzioni pubbliche
-__all__ = [
-    'DatabaseType',
-    'DatabaseConfig',
-    'DatabaseConnection',
-    'SQLiteConnection',
-    'MySQLConnection',
-    'MSSQLConnection',
-    'DatabaseFactory',
-    'DatabaseManager',
-    'DatabaseError',
-    'ConnectionError',
-    'DuplicateKeyError',
-    'ConstraintViolationError'
-]
+        result = self.select_one(query, where_params)
+        return result['count'] if result else 0
 
-# Esempio di utilizzo
-if __name__ == "__main__":
-
-    # Configurazione per SQLite
-    sqlite_config = DatabaseConfig(
-        db_type=DatabaseType.SQLITE,
-        file_path="test.db"
-    )
-
-    # Configurazione per MySQL
-    mysql_config = DatabaseConfig(
-        db_type=DatabaseType.MYSQL,
-        host="localhost",
-        port=3306,
-        database="test_db",
-        username="user",
-        password="password"
-    )
-
-    # Configurazione per SQL Server
-    mssql_config = DatabaseConfig(
-        db_type=DatabaseType.MSSQL,
-        host="localhost",
-        port=1433,
-        database="test_db",
-        username="sa",
-        password="password"
-    )
-
-    # Esempio con SQLite
-    with DatabaseManager(sqlite_config) as db:
-
-        # Crea tabella di esempio
-        db.execute_raw("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                email TEXT UNIQUE,
-                age INTEGER
-            )
-        """)
-
-        # Insert singolo
-        user_id = db.insert("users", {
-            "name": "Mario Rossi",
-            "email": "mario@example.com",
-            "age": 30
-        })
-        print(f"Inserito utente con ID: {user_id}")
-
-        # Insert multipli
-        users_data = [
-            {"name": "Luigi Verdi", "email": "luigi@example.com", "age": 25},
-            {"name": "Anna Bianchi", "email": "anna@example.com", "age": 35},
-        ]
-        inserted_count = db.insert_many("users", users_data)
-        print(f"Inseriti {inserted_count} utenti")
-
-        # Select
-        users = db.select("SELECT * FROM users WHERE age > ?", (20,))
-        print("Utenti trovati:", users)
-
-        # Update
-        updated = db.update("users",
-                            {"age": 31},
-                            "email = ?",
-                            ("mario@example.com",))
-        print(f"Aggiornati {updated} record")
-
-        # Uso di transazioni
-        try:
-            with db.transaction():
-                db.insert("users", {"name": "Test User", "email": "test@example.com", "age": 25})
-                db.update("users", {"age": 26}, "email = ?", ("test@example.com",))
-                # Se tutto va bene, viene fatto commit automatico
-        except Exception as e:
-            print(f"Errore in transazione: {e}")
-            # Rollback automatico in caso di errore
+    def exists(self, table: str, where_clause: str, where_params: Optional[tuple] = None) -> bool:
+        """Verifica se esistono record che soddisfano una condizione"""
+        return self.count(table, where_clause, where_params) > 0
